@@ -43,7 +43,7 @@ var RmCmd = &cobra.Command{
 
 				instancesOut, instances := getStackInstances(stackSetName)
 				fmt.Printf("%s", instancesOut)
-				inputString := console.Ask("Select instances number to delete or 0 to delete all. For multiple selects separate with comma:")
+				inputString := console.Ask("Select instance number to delete or 0 to delete all. Separate multiple instances with a comma:")
 
 				accounts, regions, deleteAll := convertInputString(inputString, instances)
 
@@ -100,10 +100,10 @@ func getStackInstances(stackSetName string) (string, []types.StackInstanceSummar
 	}
 
 	for i, instance := range instances {
-		stackId := (*instance.StackId)[strings.Index(*instance.StackId, "stack/")+6 : len(*instance.StackId)]
-		out.WriteString(fmt.Sprintf(" [%d] - %s / %s / %s / %s ",
+		config.Debugf("instance %d: %+v", i, instance)
+		//stackId := (*instance.StackId)[strings.Index(*instance.StackId, "stack/")+6 : len(*instance.StackId)]
+		out.WriteString(fmt.Sprintf(" [%d] - / %s / %s / %s ",
 			i+1,
-			stackId,
 			*instance.Account,
 			*instance.Region,
 			ui.ColouriseStatus(string(instance.StackInstanceStatus.DetailedStatus)),
