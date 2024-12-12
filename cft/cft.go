@@ -97,7 +97,6 @@ func (t Template) GetParameter(name string) (*yaml.Node, error) {
 func (t Template) GetNode(section Section, name string) (*yaml.Node, error) {
 	_, resMap, _ := s11n.GetMapValue(t.Node.Content[0], string(section))
 	if resMap == nil {
-		config.Debugf("GetNode t.Node: %s", node.ToSJson(t.Node))
 		return nil, fmt.Errorf("unable to locate the %s node", section)
 	}
 	// TODO: Some Sections are not Maps
@@ -144,7 +143,6 @@ func (t Template) GetSection(section Section) (*yaml.Node, error) {
 	m := t.Node.Content[0]
 	_, s, _ := s11n.GetMapValue(m, string(section))
 	if s == nil {
-		config.Debugf("GetSection t.Node: %s", node.ToSJson(t.Node))
 		return nil, fmt.Errorf("unable to locate the %s node", section)
 	}
 	return s, nil

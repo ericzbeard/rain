@@ -101,7 +101,6 @@ func getStackInstances(stackSetName string) (string, []types.StackInstanceSummar
 
 	for i, instance := range instances {
 		config.Debugf("instance %d: %+v", i, instance)
-		//stackId := (*instance.StackId)[strings.Index(*instance.StackId, "stack/")+6 : len(*instance.StackId)]
 		out.WriteString(fmt.Sprintf(" [%d] - / %s / %s / %s ",
 			i+1,
 			*instance.Account,

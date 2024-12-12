@@ -16,19 +16,11 @@ import (
 	"github.com/aws-cloudformation/rain/internal/dc"
 	"github.com/aws-cloudformation/rain/internal/ui"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
-	"github.com/aws/smithy-go/ptr"
 	"golang.org/x/exp/constraints"
 	"gopkg.in/yaml.v3"
 
 	"github.com/spf13/cobra"
 )
-
-type configFormat struct {
-	Parameters        map[string]string           `yaml:"Parameters"`
-	Tags              map[string]string           `yaml:"Tags"`
-	StackSet          cfn.StackSetConfig          `yaml:"StackSet"`
-	StackSetInstances cfn.StackSetInstancesConfig `yaml:"StackSetInstances"`
-}
 
 var accounts []string
 var regions []string
@@ -44,33 +36,52 @@ var ignoreStackInstances bool
 var DeployCmd = &cobra.Command{
 	Use:   "deploy <template> [stackset] [flags]",
 	Short: "Deploy a CloudFormation stack set from a local template",
-	Long: `Creates or updates a CloudFormation stack set <stackset> from the template file <template>.
-If you don't specify a stack set name, rain will use the template filename minus its extension.
-If you do not specify a template file, rain will asume that you want to add a new instance to an existing template,
-If a template needs to be packaged before it can be deployed, rain will package the template first.
-Rain will attempt to create an S3 bucket to store artifacts that it packages and deploys.
-The bucket's name will be of the format rain-artifacts-<AWS account id>-<AWS region>.
+	Long: `
+Creates or updates a CloudFormation stack set <stackset> from the template 
+file <template>. If you don't specify a stack set name, rain will use the 
+template filename minus its extension. If you do not specify a template file, 
+rain will assume that you want to add a new instance to an existing template.
+If a template needs to be packaged before it can be deployed, rain will 
+package the template first. Rain will attempt to create an S3 bucket to store 
+artifacts that it packages and deploys. The bucket's name will be of the 
+format rain-artifacts-<AWS account id>-<AWS region>.
 
-The config flags can be used to set accounts, regions to operate and tags with parameters to use.
-Configuration file with extended options can be provided along with '--config' flag in YAML or JSON format (see example file for details).
+The config flags can be used to set accounts, regions, tags, and parameters.
+A configuration file with extended options can be provided along with the 
+'--config' flag in YAML or JSON format.
 
-YAML:
-Parameters:
-	Name: Value
-Tags:
-	Name: Value
+The config file format is a flattened version of input values to the 
+CreateStackSet and CreateStackSetInstances APIs. See the API docs for details.
+
+Parameters: Key-Value Pairs
+Tags: Key-Value Pairs
 StackSet:
-	description: "test description"
-	...
-StackSetInstances:
-	accounts:
-		- "123456789123"
-	regions:
-		- us-east-1
-		- us-east-2
+	AdministrationRoleARN: String
+	AutoDeploymentEnabled: Bool
+	CallAsSelf: Bool
+	RetainStacksOnAccountRemoval: Bool
+	Description: String
+	ExecutionRoleName: String
+	ManagedExecutionActive: Bool
+	PermissionModelServiceManaged: Bool
+	Regions: List of Strings
+	Accounts: List of Strings
+	AccountFilterType: String
+	OrganizationalUnitIds: List of Strings
+	ConcurrencyMode: String
+	FailureTolerance: Int
+	FailureTolerancePercentage: Int
+	MaxConcurrentCount: Int
+	MaxConcurrentPercentage: Int
+	RegionConcurrencySequential: Int
+	RegionOrder: List of Strings
 ...
 
-Account(s) and region(s) provided as flags OVERRIDE values from configuration files. Tags and parameters from the configuration file are MERGED with CLI flag values. 
+Account(s) and region(s) provided as arguments on the command line 
+OVERRIDE values from configuration files. 
+
+Tags and parameters from the configuration file are 
+MERGED with command like arguments. 
 `,
 	Args:                  cobra.RangeArgs(1, 2),
 	DisableFlagsInUseLine: false,
@@ -87,10 +98,7 @@ Account(s) and region(s) provided as flags OVERRIDE values from configuration fi
 		// Read configuration data from a file
 		configData := readConfiguration(configFilePath)
 
-		if delegatedAdmin {
-			configData.StackSet.CallAs = types.CallAsDelegatedAdmin
-			configData.StackSetInstances.CallAs = types.CallAsDelegatedAdmin
-		}
+		configData.CallAsSelf = !delegatedAdmin
 
 		// Override config data with CLI flag values
 		combineConfigDataWithCliFlags(&configData, cliParamFlags, cliTagFlags, accounts, regions)
@@ -103,7 +111,7 @@ Account(s) and region(s) provided as flags OVERRIDE values from configuration fi
 		if err == nil && existingStackSet.Status != types.StackSetStatusDeleted {
 			isStacksetExists = true
 		}
-		configData.StackSet.StackSetName = stackSetName
+		configData.StackSetName = stackSetName
 		configData.StackSetInstances.StackSetName = stackSetName
 
 		spinner.Push(fmt.Sprintf("Preparing template '%s'", templateFilePath))
@@ -111,25 +119,14 @@ Account(s) and region(s) provided as flags OVERRIDE values from configuration fi
 		spinner.Pop()
 
 		// Build []types.Parameter from configuration data
-		config.Debugln("Handling parameters")
-		configData.StackSet.Parameters = buildParameterTypes(configData.StackSet.Template, configData.Parameters, existingStackSet)
+		configData.Parameters = buildParameterTypes(configData.StackSet.Template, configData.Parameters, existingStackSet)
 
 		// Build []types.Tag from configuration data
-		config.Debugln("Handling tags")
-		configData.StackSet.Tags = dc.MakeTags(configData.Tags)
-
-		if config.Debug {
-			for _, param := range configData.StackSet.Parameters {
-				val := ptr.ToString(param.ParameterValue)
-				if ptr.ToBool(param.UsePreviousValue) {
-					val = "<previous value>"
-				}
-				config.Debugf("  %s: %s", ptr.ToString(param.ParameterKey), val)
-			}
-		}
+		configData.Tags = dc.MakeTags(configData.Tags)
 
 		if isStacksetExists {
-			if forceUpdate || console.Confirm(true, "Stack set already exists. Do you want to update it?") {
+			msg := "Stack set already exists. Do you want to update it?"
+			if forceUpdate || console.Confirm(true, msg) {
 				updateStackSet(configData)
 				if !ignoreStackInstances {
 					addInstances(configData)
@@ -147,17 +144,31 @@ Account(s) and region(s) provided as flags OVERRIDE values from configuration fi
 func init() {
 	dc.FixStackNameRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
-	DeployCmd.Flags().StringSliceVar(&accounts, "accounts", []string{}, "accounts for which to create stack set instances")
-	DeployCmd.Flags().StringSliceVar(&regions, "regions", []string{}, "regions where you want to create stack set instances")
-	DeployCmd.Flags().BoolVarP(&detach, "detach", "d", false, "once deployment has started, don't wait around for it to finish")
-	DeployCmd.Flags().StringSliceVar(&tags, "tags", []string{}, "add tags to the stack; use the format key1=value1,key2=value2")
-	DeployCmd.Flags().StringSliceVar(&params, "params", []string{}, "set parameter values; use the format key1=value1,key2=value2")
-	DeployCmd.Flags().StringVarP(&configFilePath, "config", "c", "", "YAML or JSON file to set additional configuration parameters")
-	DeployCmd.Flags().BoolVarP(&forceUpdate, "yes", "y", false, "update the stackset without confirmation")
-	DeployCmd.Flags().BoolVarP(&ignoreStackInstances, "ignore-stack-instances", "i", false, "ignores adding or removing stack instances while updating, useful if you are managing the stack instances separately")
+	DeployCmd.Flags().StringSliceVar(&accounts, "accounts", []string{},
+		"accounts for which to create stack set instances")
+	DeployCmd.Flags().StringSliceVar(&regions, "regions", []string{},
+		"regions where you want to create stack set instances")
+	DeployCmd.Flags().BoolVarP(&detach, "detach", "d", false,
+		"once deployment has started, don't wait around for it to finish")
+	DeployCmd.Flags().StringSliceVar(&tags, "tags", []string{},
+		"add tags to the stack; use the format key1=value1,key2=value2")
+	DeployCmd.Flags().StringSliceVar(&params, "params", []string{},
+		"set parameter values; use the format key1=value1,key2=value2")
+	DeployCmd.Flags().StringVarP(&configFilePath, "config", "c", "",
+		"YAML or JSON file to set additional configuration parameters")
+	DeployCmd.Flags().BoolVarP(&forceUpdate, "yes", "y", false,
+		"update the stackset without confirmation")
+	DeployCmd.Flags().BoolVarP(&ignoreStackInstances, "ignore-stack-instances", "i",
+		false,
+		"do not add or remove stack instances while updating")
 }
 
 func readConfiguration(configFilePath string) configFormat {
+
+	config.Debugf("readConfiguration from %s", configFilePath)
+
+	// TODO: Create a struct to represent the config data
+	// instead of leaking the actual SDK types
 
 	var configData configFormat
 
@@ -168,11 +179,16 @@ func readConfiguration(configFilePath string) configFormat {
 			panic(ui.Errorf(err, "unable to read config file '%s'", configFilePath))
 		}
 
+		config.Debugf("configFileContent: %s", configFileContent)
+
 		err = yaml.Unmarshal([]byte(configFileContent), &configData)
 		if err != nil {
 			panic(ui.Errorf(err, "unable to parse yaml in '%s'", configFilePath))
 		}
 	}
+
+	config.Debugf("configData: %+v", configData)
+
 	return configData
 }
 
@@ -201,12 +217,12 @@ func combineConfigDataWithCliFlags(configData *configFormat, cliParams map[strin
 
 	// Override  accounts with CLI values
 	if len(cliAccounts) > 0 {
-		configData.StackSetInstances.Accounts = cliAccounts
+		configData.Accounts = cliAccounts
 	}
 
 	// Override regions with CLI values
 	if len(cliRegions) > 0 {
-		configData.StackSetInstances.Regions = cliRegions
+		configData.Regions = cliRegions
 	}
 }
 
@@ -239,7 +255,7 @@ func isInstanceConfigDataValid(c *cfn.StackSetInstancesConfig) bool {
 		config.Debugf("ConfigData is valid\n")
 		return true
 	} else {
-		config.Debugf("ConfigData NOT valid\n")
+		config.Debugf("ConfigData is NOT valid\n")
 		return false
 	}
 }
@@ -322,23 +338,15 @@ func intersection[T constraints.Ordered](pS ...[]T) []T {
 
 // creates stack set along with stack instances
 func createStackSet(configData configFormat) {
-	stackSetConfig := configData.StackSet
-	stackSetConfig.StackSetName = configData.StackSet.StackSetName
-	stackSetConfig.Parameters = configData.StackSet.Parameters
-	stackSetConfig.Tags = configData.StackSet.Tags
-	config.Debugf("Stack Set Configuration: \n%s\n", format.PrettyPrint(stackSetConfig))
-	stackSetConfig.Template = configData.StackSet.Template
 
-	if delegatedAdmin {
-		stackSetConfig.CallAs = types.CallAsDelegatedAdmin
-	}
+	config.Debugf("stackSetConfig minus Template: %+v", configData)
 
 	// Create Stack Set
 	spinner.Push("Creating stack set")
-	stackSetId, err := cfn.CreateStackSet(stackSetConfig)
+	stackSetId, err := cfn.CreateStackSet(configData)
 	spinner.Pop()
 	if err != nil || stackSetId == nil {
-		panic(ui.Errorf(err, "error while creating stack set '%s' ", configData.StackSet.StackSetName))
+		panic(ui.Errorf(err, "error while creating stack set '%s' ", configData.StackSetName))
 	} else {
 		fmt.Printf("Stack set has been created successfuly with ID: %s\n", *stackSetId)
 	}
@@ -364,7 +372,7 @@ func createStackSet(configData configFormat) {
 			fmt.Println("Stack set instances creation was initiated successfuly")
 		}
 	} else {
-		fmt.Println("Not enough information provided to create stack set instance(s). Please use configuration file or provide account(s) and region(s) for deployment as command argiments")
+		fmt.Println("Not enough information provided to create stack set instance(s). Please use configuration file or provide account(s) and region(s) for deployment as command arguments")
 	}
 }
 
@@ -431,8 +439,7 @@ func addInstances(configData configFormat) {
 
 	// check if we have accounts and regions to update
 	if !isInstanceConfigDataValid(&configData.StackSetInstances) {
-		fmt.Println("There are no new instances to be created.")
-		os.Exit(0)
+		panic("There are no new instances to be created.")
 	}
 
 	spinner.Push("Adding stack set instances")
