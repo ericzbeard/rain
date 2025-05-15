@@ -218,6 +218,90 @@ func TestAWSCLIModuleForEach(t *testing.T) {
 	runTest("awscli-modules/foreach", t)
 }
 
+// TestAWSCLIModuleFlattenBasic tests the flatten basic AWS CLI module functionality
+func TestAWSCLIModuleFlattenBasic(t *testing.T) {
+	runTest("awscli-modules/flatten-basic", t)
+}
+
+// TestAWSCLIModuleFlatten tests the flatten AWS CLI module functionality
+func TestAWSCLIModuleFlatten(t *testing.T) {
+	runTest("awscli-modules/flatten", t)
+}
+
+// TestAWSCLIModuleFlattenForeach tests the flatten foreach AWS CLI module functionality
+func TestAWSCLIModuleFlattenForeach(t *testing.T) {
+	runTest("awscli-modules/flatten-foreach", t)
+}
+
+// TestAWSCLIModuleFlattenGroupBy tests the flatten groupby AWS CLI module functionality
+func TestAWSCLIModuleFlattenGroupBy(t *testing.T) {
+	runTest("awscli-modules/flatten-groupby", t)
+}
+
+// TestAWSCLIModuleFlattenTransform tests the flatten transform AWS CLI module functionality
+func TestAWSCLIModuleFlattenTransform(t *testing.T) {
+	runTest("awscli-modules/flatten-transform", t)
+}
+
+// TestAWSCLIModuleFnForeach tests the function foreach AWS CLI module functionality
+func TestAWSCLIModuleFnForeach(t *testing.T) {
+	runTest("awscli-modules/fnforeach", t)
+}
+
+// TestAWSCLIModuleForeachOut tests the foreach output AWS CLI module functionality
+func TestAWSCLIModuleForeachOut(t *testing.T) {
+	runTest("awscli-modules/foreachout", t)
+}
+
+// TestAWSCLIModuleGetAttMapNested tests the GetAtt map nested AWS CLI module functionality
+func TestAWSCLIModuleGetAttMapNested(t *testing.T) {
+	runTest("awscli-modules/getatt-map-nested", t)
+}
+
+// TestAWSCLIModuleGetAttMapSub tests the GetAtt map sub AWS CLI module functionality
+func TestAWSCLIModuleGetAttMapSub(t *testing.T) {
+	runTest("awscli-modules/getatt-map-sub", t)
+}
+
+// TestAWSCLIModuleGetAttMap tests the GetAtt map AWS CLI module functionality
+func TestAWSCLIModuleGetAttMap(t *testing.T) {
+	runTest("awscli-modules/getatt-map", t)
+}
+
+// TestAWSCLIModuleGetAttNotation tests the GetAtt notation AWS CLI module functionality
+func TestAWSCLIModuleGetAttNotation(t *testing.T) {
+	runTest("awscli-modules/getatt-notation", t)
+}
+
+// TestAWSCLIModuleInvalidOutput tests the invalid output AWS CLI module functionality
+func TestAWSCLIModuleInvalidOutput(t *testing.T) {
+	runFailTest("awscli-modules/invalid-output", t)
+}
+
+// TestAWSCLIModuleInvalidParameterType tests the invalid parameter type AWS CLI module functionality
+func TestAWSCLIModuleInvalidParameterType(t *testing.T) {
+	runFailTest("awscli-modules/invalid-parameter-type", t)
+}
+
+// TestAWSCLIModuleMappings tests the mappings AWS CLI module functionality
+func TestAWSCLIModuleMappings(t *testing.T) {
+	runTest("awscli-modules/mappings", t)
+}
+
+// TestAWSCLIModuleModuleResourceForeach tests the module resource foreach AWS CLI module functionality
+func TestAWSCLIModuleModuleResourceForeach(t *testing.T) {
+	runTest("awscli-modules/module-resource-foreach", t)
+}
+
+// TestAWSCLIModuleParameterSchema tests the parameter schema AWS CLI module functionality
+func TestAWSCLIModuleParameterSchema(t *testing.T) {
+	runTest("awscli-modules/parameter-schema", t)
+}
+
+// TestAWSCLIModuleResourceForeach tests the resource foreach AWS CLI module functionality
+func TestAWSCLIModuleResourceForeach(t *testing.T) {
+	runTest("awscli-modules/resource-foreach", t)
+}
 func runTest(test string, t *testing.T) {
 
 	// There should be 3 files for each test, for example:
@@ -246,7 +330,7 @@ func runTest(test string, t *testing.T) {
 
 	d := diff.New(packaged, expectedTemplate)
 	if d.Mode() != "=" {
-		t.Errorf("Module test %s failed: %v", test, d.Format(true))
+		t.Errorf("Module test %s failed:\n%v", test, d.Format(true))
 	}
 }
 

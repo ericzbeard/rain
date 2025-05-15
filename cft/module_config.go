@@ -29,20 +29,20 @@ type ModuleConfig struct {
 	// Node is the yaml node for the Module config mapping node
 	Node *yaml.Node
 
-	// Map is the node for mapping (duplicating) the module based on a CSV
-	Map *yaml.Node
+	// ForEach is the node for duplicating the module based on a CSV
+	ForEach *yaml.Node
 
 	// OriginalName is the Name of the module before it got Mapped (duplicated)
 	OriginalName string
 
-	// If this module was duplicated because of the Map attribute, store the index
-	MapIndex int
+	// If this module was duplicated because of the ForEach attribute, store the index
+	ForEachIndex int
 
-	// If this module was duplicated because of the Map attribute, store the key
-	MapKey string
+	// If this module was duplicated because of the ForEach attribute, store the key
+	ForEachKey string
 
-	// IsMapCopy will be true if this instance was a duplicate of a Mapped module
-	IsMapCopy bool
+	// IsForEachCopy will be true if this instance was a duplicate of a ForEached module
+	IsForEachCopy bool
 
 	// The root directory of the template that configures this module
 	ParentRootDir string
@@ -115,7 +115,7 @@ func (t *Template) ParseModuleConfig(
 		m.Node = outputKeyValue.Content[1]
 		m.FnForEach.OutputValue = m.Node
 		n = m.Node
-		m.Map = m.FnForEach.Collection
+		m.ForEach = m.FnForEach.Collection
 
 		config.Debugf("ModuleConfig.FnForEach: %+v", m.FnForEach)
 
@@ -138,7 +138,7 @@ func (t *Template) ParseModuleConfig(
 		case Overrides:
 			m.OverridesNode = val
 		case "ForEach":
-			m.Map = val
+			m.ForEach = val
 		}
 	}
 

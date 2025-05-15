@@ -34,15 +34,15 @@ type PackageAlias struct {
 // Node is the only member that is guaranteed to exist after
 // parsing a template.
 type Template struct {
-	FileName       string
-	Name           string
-	Node           *yaml.Node
-	Constants      map[string]*yaml.Node
-	Packages       map[string]*PackageAlias
-	ModuleMapNames map[string][]string
-	ModuleMaps     map[string]*ModuleConfig
-	ModuleOutputs  map[string]*yaml.Node
-	ModuleResolved []*yaml.Node
+	FileName           string
+	Name               string
+	Node               *yaml.Node
+	Constants          map[string]*yaml.Node
+	Packages           map[string]*PackageAlias
+	ModuleForEachNames map[string][]string
+	ModuleForEach      map[string]*ModuleConfig
+	ModuleOutputs      map[string]*yaml.Node
+	ModuleResolved     []*yaml.Node
 }
 
 // Map returns the template as a map[string]interface{}
@@ -248,32 +248,32 @@ func (t Template) RemoveEmptySections() {
 	}
 }
 
-// AddMappedModule adds a reference to a module that was mapped to a CSV of keys,
+// AddForEachModule adds a reference to a module that was mapped to a CSV of keys,
 // which duplicates the module in the template. We store a reference here so
 // that we can resolve references like Content[0].Arn, which points to the first
 // mapped instance of a Module called Content, with an Output called Arn.
-func (t *Template) AddMappedModule(copiedConfig *ModuleConfig) {
-	if t.ModuleMaps == nil {
-		t.ModuleMaps = make(map[string]*ModuleConfig)
+func (t *Template) AddForEachModule(copiedConfig *ModuleConfig) {
+	if t.ModuleForEach == nil {
+		t.ModuleForEach = make(map[string]*ModuleConfig)
 	}
-	t.ModuleMaps[copiedConfig.Name] = copiedConfig
-	keyName := copiedConfig.OriginalName + copiedConfig.MapKey
+	t.ModuleForEach[copiedConfig.Name] = copiedConfig
+	keyName := copiedConfig.OriginalName + copiedConfig.ForEachKey
 	// Also add the name if referenced by key
-	t.ModuleMaps[keyName] = copiedConfig
+	t.ModuleForEach[keyName] = copiedConfig
 
-	if t.ModuleMapNames == nil {
-		t.ModuleMapNames = make(map[string][]string)
+	if t.ModuleForEachNames == nil {
+		t.ModuleForEachNames = make(map[string][]string)
 	}
 	originalName := copiedConfig.OriginalName
 	var mappedModules []string
 	var ok bool
-	if mappedModules, ok = t.ModuleMapNames[originalName]; !ok {
+	if mappedModules, ok = t.ModuleForEachNames[originalName]; !ok {
 		mappedModules = make([]string, 0)
 	}
 	if !slices.Contains(mappedModules, copiedConfig.Name) {
 		mappedModules = append(mappedModules, copiedConfig.Name)
 	}
-	t.ModuleMapNames[originalName] = mappedModules
+	t.ModuleForEachNames[originalName] = mappedModules
 }
 
 func (t *Template) AddResolvedModuleNode(n *yaml.Node) {

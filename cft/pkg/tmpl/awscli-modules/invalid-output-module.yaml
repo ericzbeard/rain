@@ -1,6 +1,7 @@
 Parameters:
   Name:
     Type: String
+    Default: TestBucket
 
 Resources:
   Bucket:
@@ -9,5 +10,6 @@ Resources:
       BucketName: !Ref Name
 
 Outputs:
-  Arn:
-    Value: !GetAtt Bucket.Arn
+  BucketArn:
+    # Missing Value property - this should cause an error
+    Description: The ARN of the bucket

@@ -95,7 +95,7 @@ func processModulesSection(t *cft.Template, n *yaml.Node,
 	originalContent := moduleSection.Content
 
 	// Duplicate module content that has a ForEach attribute
-	content, err := processMaps(originalContent, t, parentModule)
+	content, err := processForEach(originalContent, t, parentModule)
 	if err != nil {
 		return err
 	}

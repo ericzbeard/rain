@@ -110,14 +110,14 @@ func (module *Module) GetArrayIndexFromString(s string) (int, error) {
 	// Convert to integer
 	num, err := strconv.Atoi(numStr)
 	if err != nil {
-		// This might be a map key instead of an index
-		maps := module.ParentTemplate.ModuleMaps
-		if maps != nil {
-			config.Debugf("maps: %v", maps)
+		// This might be a foreach key instead of an index
+		foreaches := module.ParentTemplate.ModuleForEach
+		if foreaches != nil {
+			config.Debugf("foreaches: %v", foreaches)
 			name := s[0:start] + numStr
-			config.Debugf("Looking for ModuleMaps[%s]", name)
-			if cfg, ok := maps[name]; ok {
-				return cfg.MapIndex, nil
+			config.Debugf("Looking for ModuleForEach[%s]", name)
+			if cfg, ok := foreaches[name]; ok {
+				return cfg.ForEachIndex, nil
 			}
 		}
 		return 0, fmt.Errorf("invalid array index in string %s: %w", s, err)
@@ -143,20 +143,20 @@ func (module *Module) CheckOutputGetAtt(s string, outputName string, outputVal a
 	// Content[0].Arn
 	// If this was a Mapped module, check the original name of the module to see
 	// if this is a match. If so, and if the array element matches this module's
-	// Map index, return the encoded output value.
+	// ForEach index, return the encoded output value.
 	// If we are referencing the entire array using [], then we have to
 	// do this later, since we need all Output values.
 	if strings.Contains(reffedModuleName, "[") && !strings.Contains(reffedModuleName, "[]") {
 		// Look for the reference we saved on the template.
 		// This instance of module.Config does not have information about Maps
-		if mappedConfig, ok := module.ParentTemplate.ModuleMaps[module.Config.Name]; ok {
+		if foreachConfig, ok := module.ParentTemplate.ModuleForEach[module.Config.Name]; ok {
 			fixedName := strings.Split(reffedModuleName, "[")[0]
-			if mappedConfig.OriginalName == fixedName && tokens[1] == outputName {
+			if foreachConfig.OriginalName == fixedName && tokens[1] == outputName {
 				idx, err := module.GetArrayIndexFromString(reffedModuleName)
 				if err != nil {
 					return nil, err
 				}
-				if idx == mappedConfig.MapIndex {
+				if idx == foreachConfig.ForEachIndex {
 					return outputValue, nil
 				}
 			}
@@ -318,7 +318,7 @@ func ProcessOutputArrays(t *cft.Template) error {
 		moduleName := strings.Replace(getatt.Content[0].Value, "[]", "", 1)
 		outputName := getatt.Content[1].Value
 
-		names, ok := t.ModuleMapNames[moduleName]
+		names, ok := t.ModuleForEachNames[moduleName]
 		if !ok {
 			err = fmt.Errorf("module names not found for %s", moduleName)
 			v.Stop()

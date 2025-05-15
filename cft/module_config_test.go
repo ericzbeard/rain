@@ -165,24 +165,24 @@ Overrides:
 		t.Errorf("Expected OverridesNode to be non-nil")
 	}
 
-	// Test case 2: Module with Map
-	mapModuleYaml := `
+	// Test case 2: Module with ForEach
+	foreachModuleYaml := `
 Source: ./module.yaml
 ForEach: !Ref MyList
 Properties:
-  Name: test-${MapValue}
+  Name: test-${ForEachValue}
 `
-	mapConfig, err := template.ParseModuleConfig("MapModule",
-		unmarshalYaml(t, mapModuleYaml))
+	foreachConfig, err := template.ParseModuleConfig("ForEachModule",
+		unmarshalYaml(t, foreachModuleYaml))
 	if err != nil {
 		t.Errorf("ParseModuleConfig failed: %v", err)
 	}
 
-	if mapConfig.Name != "MapModule" {
-		t.Errorf("Expected Name=MapModule, got %s", mapConfig.Name)
+	if foreachConfig.Name != "ForEachModule" {
+		t.Errorf("Expected Name=ForEachModule, got %s", foreachConfig.Name)
 	}
-	if mapConfig.Map == nil {
-		t.Errorf("Expected Map to be non-nil")
+	if foreachConfig.ForEach == nil {
+		t.Errorf("Expected ForEach to be non-nil")
 	}
 
 	// Test case 3: Invalid node type

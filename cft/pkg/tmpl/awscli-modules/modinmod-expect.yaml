@@ -1,7 +1,7 @@
 Parameters:
   ParentVal:
     Type: String
-  pAppName:
+  AppName:
     Type: String
 Resources:
   MySubBucket:
@@ -11,14 +11,4 @@ Resources:
       XName:
         Fn::Sub: ${ParentVal}-abc
       YName:
-        Fn::Sub: ${pAppName}-xyz
-  MySubInDirBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: mod-in-mod-bucket
-      XName:
-        Fn::Sub: ${ParentVal}-abc
-      YName:
-        Fn::Sub: ${pAppName}-xyz
-  MySubInDirSubSubZ:
-    Type: A::B::C
+        Fn::Sub: ${AppName}-xyz

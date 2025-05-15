@@ -4,12 +4,12 @@ Outputs:
       Fn::GetAtt:
       - ContentBucket
       - BucketName
+  PropGetAtt:
+    Value: foo
+  PropSub:
+    Value: foo
 Resources:
   ContentBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: foo
-  Foo:
-    Type: A::B::C
-    Properties:
-      BucketName: !GetAtt ContentBucket.BucketName

@@ -35,3 +35,5 @@ local/
 .DS_Store
 plugin.so
 dist/
+
+AmazonQ.md
