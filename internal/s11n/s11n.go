@@ -148,3 +148,17 @@ func setPath(node *yaml.Node, path []interface{}, value *yaml.Node) error {
 	}
 }
 */
+// IsMapWithKey returns true if n is a mapping node with the given key
+func IsMapWithKey(n *yaml.Node, key string) bool {
+	if n == nil || n.Kind != yaml.MappingNode || len(n.Content) < 2 {
+		return false
+	}
+	
+	for i := 0; i < len(n.Content); i += 2 {
+		if i+1 < len(n.Content) && n.Content[i].Value == key {
+			return true
+		}
+	}
+	
+	return false
+}
