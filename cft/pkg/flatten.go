@@ -253,7 +253,11 @@ func extractItemsFromSource(source *yaml.Node) []*yaml.Node {
 		key := source.Content[i]
 		value := source.Content[i+1]
 
-		if value.Kind == yaml.SequenceNode {
+		// If the value is a mapping, add it directly to the result
+		// This ensures that $item.property references work correctly
+		if value.Kind == yaml.MappingNode {
+			result = append(result, value)
+		} else if value.Kind == yaml.SequenceNode {
 			for _, item := range value.Content {
 				newItem := node.MakeMapping()
 				newItem.Content = append(newItem.Content, node.Clone(key), node.Clone(item))
@@ -327,6 +331,18 @@ func applyTransform(items []*yaml.Node, templateNode *yaml.Node, variablesNode *
 			return nil, err
 		}
 
+		// Skip items that don't have all required variables
+		allVarsHaveValues := true
+		for _, values := range varValues {
+			if len(values) == 0 {
+				allVarsHaveValues = false
+				break
+			}
+		}
+		if !allVarsHaveValues {
+			continue
+		}
+
 		// Generate cross product of all variable combinations
 		combinations := generateCombinations(varValues)
 
@@ -368,7 +384,11 @@ func processItemForTransform(item *yaml.Node) []*yaml.Node {
 			// Add list items individually
 			result = append(result, value.Content...)
 		} else if value.Kind == yaml.MappingNode {
-			// For nested dictionaries, include any list properties
+			// For nested dictionaries, include the value itself as an item
+			// This ensures that $item.property references work correctly
+			result = append(result, value)
+			
+			// Also include any list properties
 			for i := 0; i < len(value.Content); i += 2 {
 				if value.Content[i].Kind == yaml.ScalarNode && i+1 < len(value.Content) {
 					propValue := value.Content[i+1]
@@ -501,9 +521,9 @@ func generateCombinations(varValues map[string][]*yaml.Node) []map[string]*yaml.
 	// Combine with values of the current variable
 	var result []map[string]*yaml.Node
 
-	// If no values for this variable, use nil to ensure at least one combination
+	// If no values for this variable, skip it entirely
 	if len(values) == 0 {
-		values = []*yaml.Node{nil}
+		return subCombinations
 	}
 
 	for _, value := range values {
@@ -608,6 +628,7 @@ func resolveVariablePath(varPath string, context map[string]*yaml.Node) (string,
 		if node, ok := context[parts[0]]; ok {
 			current := node
 			validPath := true
+			
 			for _, part := range parts[1:] {
 				if current.Kind == yaml.MappingNode {
 					found := false
@@ -677,6 +698,11 @@ func applyTemplate(item *yaml.Node, template *yaml.Node, context map[string]*yam
 				return nil, err
 			}
 
+			// Skip properties with unresolved variables
+			if containsUnresolvedVariables(transformedValue) {
+				continue
+			}
+
 			result.Content = append(result.Content, node.Clone(key), transformedValue)
 		}
 		return result, nil
@@ -689,6 +715,12 @@ func applyTemplate(item *yaml.Node, template *yaml.Node, context map[string]*yam
 			if err != nil {
 				return nil, err
 			}
+
+			// Skip items with unresolved variables
+			if containsUnresolvedVariables(transformedValue) {
+				continue
+			}
+
 			result.Content = append(result.Content, transformedValue)
 		}
 		return result, nil
@@ -699,6 +731,12 @@ func applyTemplate(item *yaml.Node, template *yaml.Node, context map[string]*yam
 		result, err := processVariableReference(template.Value, context)
 		if err != nil {
 			return nil, err
+		}
+
+		// If the result still contains variable references, it means some variables couldn't be resolved
+		if strings.Contains(result, "$") && !strings.Contains(result, "$$") {
+			// Return a special marker node that will be filtered out later
+			return nil, fmt.Errorf("unresolved variable reference in template: %s", template.Value)
 		}
 
 		// Convert to number if appropriate (but keep as string node)
@@ -759,4 +797,34 @@ func groupByAttribute(items []*yaml.Node, attribute string) *yaml.Node {
 	}
 
 	return result
+}
+
+// containsUnresolvedVariables checks if a node contains any unresolved variable references
+func containsUnresolvedVariables(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+
+	if node.Kind == yaml.ScalarNode {
+		// Check for $var or ${var} patterns
+		return strings.Contains(node.Value, "$") && !strings.Contains(node.Value, "$$")
+	}
+
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i < len(node.Content); i += 2 {
+			if containsUnresolvedVariables(node.Content[i]) || containsUnresolvedVariables(node.Content[i+1]) {
+				return true
+			}
+		}
+	}
+
+	if node.Kind == yaml.SequenceNode {
+		for _, child := range node.Content {
+			if containsUnresolvedVariables(child) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
