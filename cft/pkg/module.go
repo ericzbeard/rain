@@ -282,7 +282,7 @@ func processModule(
 		fileRootDir = parsedModule.RootDir
 	}
 
-	err = ExtraIntrinsics(t.Node, fileRootDir)
+	err = ExtraIntrinsics(t.Node, fileRootDir, true)
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func processModule(
 	return nil
 }
 
-func ExtraIntrinsics(n *yaml.Node, basePath string) error {
+func ExtraIntrinsics(n *yaml.Node, basePath string, merge bool) error {
 
 	var err error
 
@@ -304,9 +304,11 @@ func ExtraIntrinsics(n *yaml.Node, basePath string) error {
 		return err
 	}
 
-	err = FnMerge(n)
-	if err != nil {
-		return err
+	if merge {
+		err = FnMerge(n)
+		if err != nil {
+			return err
+		}
 	}
 
 	err = FnSelect(n)
@@ -315,6 +317,12 @@ func ExtraIntrinsics(n *yaml.Node, basePath string) error {
 	}
 
 	err = FnInsertFile(n, basePath)
+	if err != nil {
+		return err
+	}
+
+	// Process Fn::Flatten
+	err = FnFlatten(n)
 	if err != nil {
 		return err
 	}
@@ -402,7 +410,7 @@ func (module *Module) ProcessResources(outputNode *yaml.Node) error {
 		if fileRootDir == "" {
 			fileRootDir = module.Parsed.RootDir
 		}
-		err = ExtraIntrinsics(clonedResource, fileRootDir)
+		err = ExtraIntrinsics(clonedResource, fileRootDir, true)
 		if err != nil {
 			return err
 		}
@@ -623,20 +631,7 @@ func processAddedSections(
 
 	if parentModule == nil {
 
-		err = FnJoin(n)
-		if err != nil {
-			return err
-		}
-
-		// Putting Merge here breaks it, since it merges unresolved Refs...
-		// TODO: Need to make sure Merge doesn't run until the very end..
-
-		err = FnSelect(n)
-		if err != nil {
-			return err
-		}
-
-		err = FnInsertFile(n, rootDir)
+		err = ExtraIntrinsics(n, rootDir, false)
 		if err != nil {
 			return err
 		}

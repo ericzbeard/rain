@@ -371,7 +371,7 @@ func (module *Module) FnInvoke(n *yaml.Node) error {
 						}
 
 						// Process any intrinsic functions in the result
-						err = ExtraIntrinsics(result, tempModule.Parsed.RootDir)
+						err = ExtraIntrinsics(result, tempModule.Parsed.RootDir, true)
 						if err != nil {
 							err = fmt.Errorf("failed to process intrinsic functions in output %s: %v", outputKeyStr, err)
 							v.Stop()
