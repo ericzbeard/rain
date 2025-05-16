@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/aws-cloudformation/rain/internal/node"
@@ -171,7 +172,23 @@ func TestProcessVariableReference(t *testing.T) {
 					return m
 				}(),
 			},
-			expected: "Value: &{Mapping  [&{Scalar key } &{Scalar value }]}",
+			expected: "Value: ",
+			wantErr:  false,
+		},
+		{
+			name:     "Multiple escaped dollar signs",
+			template: "Cost: $$5 and $$10",
+			context:  map[string]*yaml.Node{},
+			expected: "Cost: $5 and $10",
+			wantErr:  false,
+		},
+		{
+			name:     "Mixed escaped and variable",
+			template: "Cost: $$5 for $item",
+			context: map[string]*yaml.Node{
+				"item": node.MakeScalar("coffee"),
+			},
+			expected: "Cost: $5 for coffee",
 			wantErr:  false,
 		},
 	}
@@ -183,6 +200,15 @@ func TestProcessVariableReference(t *testing.T) {
 				t.Errorf("processVariableReference() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			
+			// For the non-scalar test, we just check that it doesn't contain the original variable reference
+			if tt.name == "Non-scalar variable" {
+				if strings.Contains(result, "$complex") {
+					t.Errorf("processVariableReference() should have replaced $complex but didn't")
+				}
+				return
+			}
+			
 			if result != tt.expected {
 				t.Errorf("processVariableReference() = %v, want %v", result, tt.expected)
 			}

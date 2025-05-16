@@ -546,7 +546,15 @@ func processVariableReference(templateStr string, context map[string]*yaml.Node)
 	i := 0
 
 	for i < len(result) {
-		if result[i] == '$' && i+1 < len(result) && result[i+1] != '$' {
+		if result[i] == '$' && i+1 < len(result) {
+			// Check for escaped dollar sign ($$)
+			if i+1 < len(result) && result[i+1] == '$' {
+				// Replace $$ with $ and continue
+				result = result[:i] + "$" + result[i+2:]
+				i++ // Move past the single $ we kept
+				continue
+			}
+			
 			// Found a variable reference
 			varStart := i
 
@@ -572,14 +580,9 @@ func processVariableReference(templateStr string, context map[string]*yaml.Node)
 				}
 
 				// Replace the variable reference with its value
-				if replacement != "" {
-					result = strings.Replace(result, fullVar, replacement, 1)
-					// Reset i to continue from the start of the replacement
-					i = varStart + len(replacement)
-				} else {
-					// Variable not found, continue
-					i = varStart + 1
-				}
+				result = strings.Replace(result, fullVar, replacement, 1)
+				// Reset i to continue from the start of the replacement
+				i = varStart + len(replacement)
 			} else {
 				// Simple reference $var or path expression $var.path
 				i++ // Skip past $
@@ -598,14 +601,9 @@ func processVariableReference(templateStr string, context map[string]*yaml.Node)
 				}
 
 				// Replace the variable reference with its value
-				if replacement != "" {
-					result = strings.Replace(result, fullVar, replacement, 1)
-					// Reset i to continue from the start of the replacement
-					i = varStart + len(replacement)
-				} else {
-					// Variable not found, continue
-					i = varStart + 1
-				}
+				result = strings.Replace(result, fullVar, replacement, 1)
+				// Reset i to continue from the start of the replacement
+				i = varStart + len(replacement)
 			}
 		} else {
 			i++
@@ -657,15 +655,13 @@ func resolveVariablePath(varPath string, context map[string]*yaml.Node) (string,
 		if node, ok := context[varPath]; ok {
 			if node.Kind == yaml.ScalarNode {
 				return node.Value, nil
-			} else if node.Kind == yaml.MappingNode || node.Kind == yaml.SequenceNode {
-				// For non-scalar nodes, convert to string representation
-				// This is a simplification - in a real implementation you might want
-				// to handle this differently based on the context
-				return fmt.Sprintf("%v", node), nil
 			}
+			// For non-scalar nodes, we return empty string to match AWS CLI behavior
+			return "", nil
 		}
 	}
 
+	// Return empty string for missing variables instead of nil
 	return "", nil
 }
 
@@ -734,11 +730,8 @@ func applyTemplate(item *yaml.Node, template *yaml.Node, context map[string]*yam
 		}
 
 		// If the result still contains variable references, it means some variables couldn't be resolved
-		if strings.Contains(result, "$") && !strings.Contains(result, "$$") {
-			// Return a special marker node that will be filtered out later
-			return nil, fmt.Errorf("unresolved variable reference in template: %s", template.Value)
-		}
-
+		// We'll keep them in the output, as AWS CLI does, rather than filtering them out
+		
 		// Convert to number if appropriate (but keep as string node)
 		value := convertStringToNumber(result)
 
@@ -800,14 +793,33 @@ func groupByAttribute(items []*yaml.Node, attribute string) *yaml.Node {
 }
 
 // containsUnresolvedVariables checks if a node contains any unresolved variable references
+// We now only consider a variable unresolved if it's a reference that doesn't use escaped dollar signs
 func containsUnresolvedVariables(node *yaml.Node) bool {
 	if node == nil {
 		return false
 	}
 
 	if node.Kind == yaml.ScalarNode {
-		// Check for $var or ${var} patterns
-		return strings.Contains(node.Value, "$") && !strings.Contains(node.Value, "$$")
+		// Check for $var or ${var} patterns but ignore $$
+		if !strings.Contains(node.Value, "$") {
+			return false
+		}
+		
+		// Check if there are any non-escaped dollar signs
+		i := 0
+		for i < len(node.Value) {
+			if node.Value[i] == '$' {
+				// If this is an escaped dollar sign ($$), skip both characters
+				if i+1 < len(node.Value) && node.Value[i+1] == '$' {
+					i += 2
+					continue
+				}
+				// Found an unescaped dollar sign
+				return true
+			}
+			i++
+		}
+		return false
 	}
 
 	if node.Kind == yaml.MappingNode {
