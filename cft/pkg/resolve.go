@@ -252,9 +252,8 @@ func (module *Module) ResolveSub(n *yaml.Node) error {
 }
 
 func (module *Module) ResolveGetAtt(n *yaml.Node) error {
-
-	// A GetAtt somewhere in the module refers to another Resource in the module.
-	// Simply prepend the module name.
+	// A GetAtt somewhere in the module refers to another Resource in the module,
+	// or it could be a map access pattern or module output reference.
 
 	if len(n.Content) < 2 {
 		return fmt.Errorf("invalid GetAtt: %s", node.YamlStr(n))
@@ -263,6 +262,32 @@ func (module *Module) ResolveGetAtt(n *yaml.Node) error {
 	prop := n.Content[1]
 	resourceName := prop.Content[0].Value
 
+	// Check if this is a map access pattern
+	if strings.Contains(resourceName, "[") && len(prop.Content) > 1 {
+		err := module.resolveMapAccess(n)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Check if this is a dot notation for map access or module output
+	if strings.Contains(resourceName, ".") {
+		parts := strings.SplitN(resourceName, ".", 2)
+		if len(parts) == 2 && (parts[1] == "*" || module.isModuleParameter(parts[0])) {
+			// Convert dot notation to bracket notation
+			if parts[1] == "*" {
+				prop.Content[0].Value = parts[0] + "[*]"
+			} else {
+				prop.Content[0].Value = parts[0] + "[" + parts[1] + "]"
+			}
+			
+			// Try to resolve again with the new notation
+			return module.resolveMapAccess(n)
+		}
+	}
+
+	// Standard resource reference
 	if module.ResourcesNode != nil {
 		_, resource, _ := s11n.GetMapValue(module.ResourcesNode, resourceName)
 		if resource != nil {
@@ -273,6 +298,169 @@ func (module *Module) ResolveGetAtt(n *yaml.Node) error {
 	}
 
 	return nil
+}
+
+// isModuleParameter checks if the given name is a parameter in the module
+func (module *Module) isModuleParameter(name string) bool {
+	if module.ParametersNode == nil {
+		return false
+	}
+	
+	for i := 0; i < len(module.ParametersNode.Content); i += 2 {
+		if module.ParametersNode.Content[i].Value == name {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// resolveMapAccess handles map access patterns like MapName[*], MapName[Key], and MapName[Key].Attribute
+func (module *Module) resolveMapAccess(n *yaml.Node) error {
+	prop := n.Content[1]
+	resourceName := prop.Content[0].Value
+	
+	// Extract the map name and key
+	mapName, key, hasKey := extractMapNameAndKey(resourceName)
+	if !hasKey {
+		return nil // Not a map access pattern
+	}
+	
+	// Look for the map in module parameters
+	if module.ParametersNode == nil {
+		return nil
+	}
+	
+	_, mapParam, _ := s11n.GetMapValue(module.ParametersNode, mapName)
+	if mapParam == nil {
+		return nil
+	}
+	
+	// Check if this parameter has a value in the parent template
+	if module.Config.PropertiesNode == nil {
+		return nil
+	}
+	
+	_, mapValue, _ := s11n.GetMapValue(module.Config.PropertiesNode, mapName)
+	if mapValue == nil {
+		// Check for default value
+		_, defaultValue, _ := s11n.GetMapValue(mapParam, "Default")
+		if defaultValue == nil {
+			return nil
+		}
+		mapValue = defaultValue
+	}
+	
+	// Handle different map access patterns
+	if key == "*" {
+		// Return all values for the specified attribute
+		if len(prop.Content) > 1 {
+			attribute := prop.Content[1].Value
+			values := extractAllAttributeValues(mapValue, attribute)
+			if values != nil {
+				*n = *values
+				return nil
+			}
+		} else {
+			// Return all keys in the map
+			keys := extractAllMapKeys(mapValue)
+			if keys != nil {
+				*n = *keys
+				return nil
+			}
+		}
+	} else {
+		// Access specific key
+		_, keyValue, _ := s11n.GetMapValue(mapValue, key)
+		if keyValue != nil {
+			if len(prop.Content) > 1 {
+				// Access attribute of the key
+				attribute := prop.Content[1].Value
+				attrValue := extractAttributeValue(keyValue, attribute)
+				if attrValue != nil {
+					*n = *attrValue
+					return nil
+				}
+			} else {
+				// Return the entire value at the key
+				*n = *keyValue
+				return nil
+			}
+		}
+	}
+	
+	return nil
+}
+
+// extractMapNameAndKey extracts the map name and key from a string like "MapName[Key]"
+func extractMapNameAndKey(s string) (string, string, bool) {
+	openBracket := strings.Index(s, "[")
+	closeBracket := strings.Index(s, "]")
+	
+	if openBracket == -1 || closeBracket == -1 || closeBracket <= openBracket {
+		return s, "", false
+	}
+	
+	mapName := s[:openBracket]
+	key := s[openBracket+1:closeBracket]
+	
+	return mapName, key, true
+}
+
+// extractAllAttributeValues extracts all values for a specific attribute from a map
+func extractAllAttributeValues(mapNode *yaml.Node, attribute string) *yaml.Node {
+	if mapNode.Kind != yaml.MappingNode {
+		return nil
+	}
+	
+	result := node.MakeSequence([]string{})
+	
+	for i := 0; i < len(mapNode.Content); i += 2 {
+		valueNode := mapNode.Content[i+1]
+		
+		if valueNode.Kind == yaml.MappingNode {
+			_, attrValue, _ := s11n.GetMapValue(valueNode, attribute)
+			if attrValue != nil {
+				result.Content = append(result.Content, node.Clone(attrValue))
+			}
+		}
+	}
+	
+	if len(result.Content) == 0 {
+		return nil
+	}
+	
+	return result
+}
+
+// extractAllMapKeys extracts all keys from a map
+func extractAllMapKeys(mapNode *yaml.Node) *yaml.Node {
+	if mapNode.Kind != yaml.MappingNode {
+		return nil
+	}
+	
+	result := node.MakeSequence([]string{})
+	
+	for i := 0; i < len(mapNode.Content); i += 2 {
+		key := mapNode.Content[i]
+		result.Content = append(result.Content, node.Clone(key))
+	}
+	
+	if len(result.Content) == 0 {
+		return nil
+	}
+	
+	return result
+}
+
+// extractAttributeValue extracts a specific attribute value from a node
+func extractAttributeValue(valueNode *yaml.Node, attribute string) *yaml.Node {
+	if valueNode.Kind != yaml.MappingNode {
+		return nil
+	}
+	
+	_, attrValue, _ := s11n.GetMapValue(valueNode, attribute)
+	return attrValue
 }
 
 // Rename a resource defined in the module to add the template resource name

@@ -15,6 +15,177 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ProcessOutputArrays looks for array references like Content[].Arn or Content.*.Arn
+// and replaces them with the appropriate values.
+func ProcessOutputArrays(t *cft.Template) error {
+	if t == nil {
+		return errors.New("t is nil")
+	}
+
+	var err error
+
+	vf := func(v *visitor.Visitor) {
+		// Look for patterns like:
+		// - A[*].B (wildcard)
+		// - A.*.B (dot notation wildcard)
+		// - A[key].B (key access)
+		// - A.key.B (dot notation key access)
+
+		n := v.GetYamlNode()
+		if n.Kind != yaml.MappingNode || len(n.Content) != 2 {
+			return
+		}
+
+		if n.Content[0].Value != string(cft.GetAtt) {
+			return
+		}
+
+		getatt := n.Content[1]
+		if getatt.Kind != yaml.SequenceNode || len(getatt.Content) != 2 {
+			err = fmt.Errorf("invalid getatt: %s", node.YamlStr(getatt))
+			v.Stop()
+			return
+		}
+
+		// Check for wildcard notation: Module[*].Output or Module.*.Output
+		moduleRef := getatt.Content[0].Value
+		outputName := getatt.Content[1].Value
+		
+		// Convert dot notation to bracket notation for consistency
+		if strings.Contains(moduleRef, ".") && !strings.Contains(moduleRef, "[") {
+			parts := strings.SplitN(moduleRef, ".", 2)
+			if len(parts) == 2 {
+				if parts[1] == "*" {
+					moduleRef = parts[0] + "[*]"
+				} else {
+					// This could be a key reference like Module.key
+					// Check if it's a ForEach module
+					if _, ok := t.ModuleForEachNames[parts[0]]; ok {
+						moduleRef = parts[0] + "[" + parts[1] + "]"
+					}
+				}
+				getatt.Content[0].Value = moduleRef
+			}
+		}
+
+		// Process wildcard notation
+		if strings.Contains(moduleRef, "[*]") {
+			moduleName := strings.Replace(moduleRef, "[*]", "", 1)
+			names, ok := t.ModuleForEachNames[moduleName]
+			if !ok {
+				err = fmt.Errorf("module names not found for %s", moduleName)
+				v.Stop()
+				return
+			}
+
+			items := make([]*yaml.Node, 0)
+			for _, name := range names {
+				outputs, ok := t.ModuleOutputs[name]
+				if !ok {
+					err = fmt.Errorf("%s not found in ModuleOutputs", name)
+					v.Stop()
+					return
+				}
+				_, o, _ := s11n.GetMapValue(outputs, outputName)
+				if o == nil {
+					err = fmt.Errorf("%s not found in Outputs for %s", outputName, name)
+					v.Stop()
+					return
+				}
+				_, val, _ := s11n.GetMapValue(o, "Value")
+				if val == nil {
+					err = fmt.Errorf("module output %s.%s missing Value", name, outputName)
+					v.Stop()
+					return
+				}
+				items = append(items, val)
+			}
+			seq := &yaml.Node{Kind: yaml.SequenceNode, Content: items}
+			*n = *seq
+			return
+		}
+
+		// Process key access notation: Module[key].Output
+		if strings.Contains(moduleRef, "[") && strings.Contains(moduleRef, "]") {
+			moduleName, key, hasKey := extractModuleNameAndKey(moduleRef)
+			if !hasKey {
+				return
+			}
+
+			// Check if this is a ForEach module
+			if foreachConfig, ok := t.ModuleForEach[moduleName+key]; ok {
+				// This is a key-based access to a ForEach module
+				outputs, ok := t.ModuleOutputs[foreachConfig.Name]
+				if !ok {
+					err = fmt.Errorf("%s not found in ModuleOutputs", foreachConfig.Name)
+					v.Stop()
+					return
+				}
+				_, o, _ := s11n.GetMapValue(outputs, outputName)
+				if o == nil {
+					err = fmt.Errorf("%s not found in Outputs for %s", outputName, foreachConfig.Name)
+					v.Stop()
+					return
+				}
+				_, val, _ := s11n.GetMapValue(o, "Value")
+				if val == nil {
+					err = fmt.Errorf("module output %s.%s missing Value", foreachConfig.Name, outputName)
+					v.Stop()
+					return
+				}
+				*n = *val
+				return
+			}
+
+			// Try numeric index
+			idx, idxErr := strconv.Atoi(key)
+			if idxErr == nil {
+				// This is a numeric index access
+				name := fmt.Sprintf("%s%d", moduleName, idx)
+				outputs, ok := t.ModuleOutputs[name]
+				if !ok {
+					err = fmt.Errorf("%s not found in ModuleOutputs", name)
+					v.Stop()
+					return
+				}
+				_, o, _ := s11n.GetMapValue(outputs, outputName)
+				if o == nil {
+					err = fmt.Errorf("%s not found in Outputs for %s", outputName, name)
+					v.Stop()
+					return
+				}
+				_, val, _ := s11n.GetMapValue(o, "Value")
+				if val == nil {
+					err = fmt.Errorf("module output %s.%s missing Value", name, outputName)
+					v.Stop()
+					return
+				}
+				*n = *val
+				return
+			}
+		}
+	}
+
+	visitor.NewVisitor(t.Node).Visit(vf)
+
+	return err
+}
+
+// extractModuleNameAndKey extracts the module name and key from a string like "ModuleName[Key]"
+func extractModuleNameAndKey(s string) (string, string, bool) {
+	openBracket := strings.Index(s, "[")
+	closeBracket := strings.Index(s, "]")
+	
+	if openBracket == -1 || closeBracket == -1 || closeBracket <= openBracket {
+		return s, "", false
+	}
+	
+	moduleName := s[:openBracket]
+	key := s[openBracket+1:closeBracket]
+	
+	return moduleName, key, true
+}
+
 // processModuleOutputs looks for any references in the parent
 // template to the module's outputs and replaces them.
 func (module *Module) ProcessOutputs() error {
@@ -129,48 +300,68 @@ func (module *Module) GetArrayIndexFromString(s string) (int, error) {
 // CheckOutputGetAtt checks to see if a GetAtt string matches an Output.
 // Returns nil if it's not a match.
 func (module *Module) CheckOutputGetAtt(s string, outputName string, outputVal any) (*yaml.Node, error) {
+	// Handle dot notation (Module.Output)
 	tokens := strings.Split(s, ".")
 	outputValue, err := encodeOutputValue(outputName, outputVal)
 	if err != nil {
 		return nil, err
 	}
-	if len(tokens) != 2 {
-		return nil, nil
-	}
-
-	reffedModuleName := tokens[0]
-
-	// Content[0].Arn
-	// If this was a Mapped module, check the original name of the module to see
-	// if this is a match. If so, and if the array element matches this module's
-	// ForEach index, return the encoded output value.
-	// If we are referencing the entire array using [], then we have to
-	// do this later, since we need all Output values.
-	if strings.Contains(reffedModuleName, "[") && !strings.Contains(reffedModuleName, "[]") {
-		// Look for the reference we saved on the template.
-		// This instance of module.Config does not have information about Maps
-		if foreachConfig, ok := module.ParentTemplate.ModuleForEach[module.Config.Name]; ok {
-			fixedName := strings.Split(reffedModuleName, "[")[0]
-			if foreachConfig.OriginalName == fixedName && tokens[1] == outputName {
-				idx, err := module.GetArrayIndexFromString(reffedModuleName)
-				if err != nil {
-					return nil, err
+	
+	// Handle different notation formats
+	if len(tokens) == 2 {
+		// Standard notation: ModuleName.OutputName
+		reffedModuleName := tokens[0]
+		
+		// Handle bracket notation: ModuleName[key] or ModuleName[index]
+		if strings.Contains(reffedModuleName, "[") {
+			moduleName, key, hasKey := extractModuleNameAndKey(reffedModuleName)
+			
+			// Handle wildcard notation: ModuleName[*]
+			if hasKey && key == "*" {
+				// This is handled by ProcessOutputArrays
+				return nil, nil
+			}
+			
+			// Handle key or index notation: ModuleName[key] or ModuleName[index]
+			if hasKey {
+				// If this is a ForEach module, check if this instance matches
+				if foreachConfig, ok := module.ParentTemplate.ModuleForEach[module.Config.Name]; ok {
+					if foreachConfig.OriginalName == moduleName && tokens[1] == outputName {
+						// Check if the key matches this module's key
+						if key == foreachConfig.ForEachKey || key == strconv.Itoa(foreachConfig.ForEachIndex) {
+							return outputValue, nil
+						}
+					}
 				}
-				if idx == foreachConfig.ForEachIndex {
+				return nil, nil
+			}
+		}
+		
+		// Standard module output reference
+		if reffedModuleName != module.Config.Name {
+			return nil, nil
+		}
+		if tokens[1] != outputName {
+			return nil, nil
+		}
+		return outputValue, nil
+	} else if len(tokens) == 3 {
+		// Dot notation for key access: ModuleName.key.OutputName
+		reffedModuleName := tokens[0]
+		key := tokens[1]
+		
+		// Check if this is a ForEach module
+		if foreachConfig, ok := module.ParentTemplate.ModuleForEach[module.Config.Name]; ok {
+			if foreachConfig.OriginalName == reffedModuleName && tokens[2] == outputName {
+				// Check if the key matches this module's key
+				if key == foreachConfig.ForEachKey || key == strconv.Itoa(foreachConfig.ForEachIndex) {
 					return outputValue, nil
 				}
 			}
 		}
 	}
-
-	if reffedModuleName != module.Config.Name {
-
-		return nil, nil
-	}
-	if tokens[1] != outputName {
-		return nil, nil
-	}
-	return outputValue, nil
+	
+	return nil, nil
 }
 
 // Convert an output value back to a Node.
@@ -279,79 +470,4 @@ func (module *Module) OutputSub(outputName string, outputVal any, n *yaml.Node) 
 		*n = *subNode
 	}
 	return nil
-}
-
-// After processing normal outputs, go back and look for array references
-// like Content[].Arn. Values for these should be stored on the
-// template.
-func ProcessOutputArrays(t *cft.Template) error {
-	if t == nil {
-		return errors.New("t is nil")
-	}
-
-	var err error
-
-	vf := func(v *visitor.Visitor) {
-		// Look for A[].B
-		// Get t.ModuleOutputs for all of them, convert to Sequence
-
-		n := v.GetYamlNode()
-		if n.Kind != yaml.MappingNode || len(n.Content) != 2 {
-			return
-		}
-
-		if n.Content[0].Value != string(cft.GetAtt) {
-			return
-		}
-
-		getatt := n.Content[1]
-		if getatt.Kind != yaml.SequenceNode || len(getatt.Content) != 2 {
-			err = fmt.Errorf("invalid getatt: %s", node.YamlStr(getatt))
-			v.Stop()
-			return
-		}
-
-		if !strings.Contains(getatt.Content[0].Value, "[]") {
-			return
-		}
-
-		moduleName := strings.Replace(getatt.Content[0].Value, "[]", "", 1)
-		outputName := getatt.Content[1].Value
-
-		names, ok := t.ModuleForEachNames[moduleName]
-		if !ok {
-			err = fmt.Errorf("module names not found for %s", moduleName)
-			v.Stop()
-			return
-		}
-
-		items := make([]*yaml.Node, 0)
-		for _, name := range names {
-			outputs, ok := t.ModuleOutputs[name]
-			if !ok {
-				err = fmt.Errorf("%s not found in ModuleOutputs", name)
-				v.Stop()
-				return
-			}
-			_, o, _ := s11n.GetMapValue(outputs, outputName)
-			if o == nil {
-				err = fmt.Errorf("%s not found in Outputs for %s", outputName, name)
-				v.Stop()
-				return
-			}
-			_, val, _ := s11n.GetMapValue(o, "Value")
-			if val == nil {
-				err = fmt.Errorf("module output %s.%s missing Value", name, outputName)
-				v.Stop()
-				return
-			}
-			items = append(items, val)
-		}
-		seq := &yaml.Node{Kind: yaml.SequenceNode, Content: items}
-		*n = *seq
-	}
-
-	visitor.NewVisitor(t.Node).Visit(vf)
-
-	return err
 }
