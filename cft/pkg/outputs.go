@@ -50,7 +50,7 @@ func ProcessOutputArrays(t *cft.Template) error {
 		// Check for wildcard notation: Module[*].Output or Module.*.Output
 		moduleRef := getatt.Content[0].Value
 		outputName := getatt.Content[1].Value
-		
+
 		// Convert dot notation to bracket notation for consistency
 		if strings.Contains(moduleRef, ".") && !strings.Contains(moduleRef, "[") {
 			parts := strings.SplitN(moduleRef, ".", 2)
@@ -175,14 +175,14 @@ func ProcessOutputArrays(t *cft.Template) error {
 func extractModuleNameAndKey(s string) (string, string, bool) {
 	openBracket := strings.Index(s, "[")
 	closeBracket := strings.Index(s, "]")
-	
+
 	if openBracket == -1 || closeBracket == -1 || closeBracket <= openBracket {
 		return s, "", false
 	}
-	
+
 	moduleName := s[:openBracket]
-	key := s[openBracket+1:closeBracket]
-	
+	key := s[openBracket+1 : closeBracket]
+
 	return moduleName, key, true
 }
 
@@ -306,22 +306,22 @@ func (module *Module) CheckOutputGetAtt(s string, outputName string, outputVal a
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Handle different notation formats
 	if len(tokens) == 2 {
 		// Standard notation: ModuleName.OutputName
 		reffedModuleName := tokens[0]
-		
+
 		// Handle bracket notation: ModuleName[key] or ModuleName[index]
 		if strings.Contains(reffedModuleName, "[") {
 			moduleName, key, hasKey := extractModuleNameAndKey(reffedModuleName)
-			
+
 			// Handle wildcard notation: ModuleName[*]
 			if hasKey && key == "*" {
 				// This is handled by ProcessOutputArrays
 				return nil, nil
 			}
-			
+
 			// Handle key or index notation: ModuleName[key] or ModuleName[index]
 			if hasKey {
 				// If this is a ForEach module, check if this instance matches
@@ -336,7 +336,7 @@ func (module *Module) CheckOutputGetAtt(s string, outputName string, outputVal a
 				return nil, nil
 			}
 		}
-		
+
 		// Standard module output reference
 		if reffedModuleName != module.Config.Name {
 			return nil, nil
@@ -349,7 +349,7 @@ func (module *Module) CheckOutputGetAtt(s string, outputName string, outputVal a
 		// Dot notation for key access: ModuleName.key.OutputName
 		reffedModuleName := tokens[0]
 		key := tokens[1]
-		
+
 		// Check if this is a ForEach module
 		if foreachConfig, ok := module.ParentTemplate.ModuleForEach[module.Config.Name]; ok {
 			if foreachConfig.OriginalName == reffedModuleName && tokens[2] == outputName {
@@ -360,7 +360,7 @@ func (module *Module) CheckOutputGetAtt(s string, outputName string, outputVal a
 			}
 		}
 	}
-	
+
 	return nil, nil
 }
 

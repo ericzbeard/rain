@@ -127,11 +127,11 @@ func FnSelect(n *yaml.Node) error {
 			v.Stop()
 			return
 		}
-		arr := sel.Content[0]
+		arr := sel.Content[1]
 		if arr.Kind != yaml.SequenceNode {
 			return
 		}
-		idx := sel.Content[1]
+		idx := sel.Content[0]
 		if idx.Kind != yaml.ScalarNode {
 			return
 		}

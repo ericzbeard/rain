@@ -92,10 +92,14 @@ func processModulesSection(t *cft.Template, n *yaml.Node,
 		return errors.New("the Modules section is not a mapping node")
 	}
 
-	originalContent := moduleSection.Content
+	// First, process any Fn::Flatten in the module section
+	err := FnFlatten(moduleSection)
+	if err != nil {
+		return err
+	}
 
 	// Duplicate module content that has a ForEach attribute
-	content, err := processForEach(originalContent, t, parentModule)
+	content, err := processForEach(moduleSection.Content, t, parentModule)
 	if err != nil {
 		return err
 	}
